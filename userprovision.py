@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 #
+# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #
 # Copyright (c) 2015, Cisco
 #
@@ -23,27 +24,10 @@
 from __future__ import print_function
 import requests, json
 import getopt, os, sys, random, string
-
-'''
 import logging
 
-# These two lines enable debugging at httplib level (requests->urllib3->http.client)
-# You will see the REQUEST, including HEADERS and DATA, and RESPONSE with HEADERS but without DATA.
-# The only thing missing will be the response.body which is not logged.
-try:
-	import http.client as http_client
-except ImportError:
-	# Python 2
-	import httplib as http_client
-http_client.HTTPConnection.debuglevel = 1
+import pprint
 
-# You must initialize logging, otherwise you'll not see debug output.
-logging.basicConfig() 
-logging.getLogger().setLevel(logging.DEBUG)
-requests_log = logging.getLogger("requests.packages.urllib3")
-requests_log.setLevel(logging.DEBUG)
-requests_log.propagate = True
-'''
 
 
 # defined user roles for User Creation API call
@@ -63,20 +47,23 @@ BillingAdmin
 '''
 
 debug=0
+verify_ssl=False
 admin_username = "admin"
 admin_password = "somepassword"
 base_url = "https://some.server.com:443/app/api/rest"
+admin_apikey = ''
 
 # fix me on the server side!!!!
-requests.packages.urllib3.disable_warnings()
+if not verify_ssl:
+	requests.packages.urllib3.disable_warnings()
 
 
 def usage(name, code):
-   print('Usage:', name, '[-a, -add]|[-d, --delete] [options] userid', file=sys.stderr)
-   print('  -e, --email=emailaddress', file=sys.stderr)
-   print('  -f, --firstname=firstname', file=sys.stderr)
-   print('  -l, --lastname=lastname', file=sys.stderr)
-   sys.exit(code)
+    print('Usage:', name, '[-a, -add]|[-d, --delete] [options] userid', file=sys.stderr)
+    print('  -e, --email=emailaddress', file=sys.stderr)
+    print('  -f, --firstname=firstname', file=sys.stderr)
+    print('  -l, --lastname=lastname', file=sys.stderr)
+    sys.exit(code)
 
 
 def create_password():
@@ -89,61 +76,120 @@ def create_password():
 def get_apikey(username, password):
 	# get the API key for the admin user
 	payload = {'formatType': 'json', 'opName': 'getRESTKey', 'user': username, 'password': password}
-	result = requests.get(base_url, params=payload, verify=False)
+	result = requests.get(base_url, params=payload, verify=verify_ssl)
 	if debug>0:
 		print(result.status_code)
 
 	# 200 if we got a valid key
 	if result.status_code != 200:
 		print("can't get API key!")
-		return ""
+		return ''
 	else:
 		return result.json()
 
 
-def add_user(data):
-	api_key=get_apikey(admin_username, admin_password)
-	if len(api_key) > 0:
-		# create user
-		password = create_password()
-		headers = {'X-Cloupia-Request-Key': api_key}
-		opdata  = {
-			'param0': data['userid'],		# username
-			'param1': password,				# password
-			'param2': data['firstname'],	# first name
-			'param3': data['lastname'],		# last name
-			'param4': data['email'],		# email address
-			'param5': 'Regular',			# user role
-			'param6': 'somegroup'		# group name
-		}
-		payload = {
-			'formatType': 'json', 
-			'opName': 'userAPIAddUser', 
-		#	'opData': json.dumps(opdata, separators=(',', ':')).replace('"', "'")
-		#	'opData': json.dumps(opdata, separators=(',', ':'))
-			'opData': json.dumps(opdata)
-		}
-		result = requests.get(base_url, params=payload, headers=headers, verify=False)
-		return [result, password]
+def get_admin_apikey():
+	global admin_apikey
 
+	admin_apikey = get_apikey(admin_username, admin_password)
+	if len(admin_apikey) == 0:
+		print('Error: admin key retrieval', file=sys.stderr)
+		sys.exit(2)
+
+
+def add_group(groupname):
+	# create group
+	headers = {'X-Cloupia-Request-Key': admin_apikey}
+	opdata  = {
+		'param0': groupname,			# Name
+		'param1': '',					# Description
+		'param2': '',					# First Name
+		'param3': '',					# Last Name
+		'param4': 'no-reply@cisco.com'	# Contact Email 
+	}
+	payload = {
+		'formatType': 'json', 
+		'opName': 'userAPIAddGroup', 
+		'opData': json.dumps(opdata)
+	}
+	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
+	return result
+
+
+def add_user(data):
+	# create user
+	password = create_password()
+	headers = {'X-Cloupia-Request-Key': admin_apikey}
+	opdata  = {
+		'param0': data['userid'],			# username
+		'param1': password,					# password
+		'param2': data['firstname'],		# first name
+		'param3': data['lastname'],			# last name
+		'param4': data['email'],			# email address
+		'param5': 'Regular',				# user role
+		'param6': 'CiscoLiveMilan'			# group name
+	#	'param6': 'group-'+data['userid']	# group name
+	}
+	payload = {
+		'formatType': 'json', 
+		'opName': 'userAPIAddUser', 
+	#	'opData': json.dumps(opdata, separators=(',', ':')).replace('"', "'")
+	#	'opData': json.dumps(opdata, separators=(',', ':'))
+		'opData': json.dumps(opdata)
+	}
+	print(opdata)
+	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
+	return [result, password]
+
+
+def show_vms_for_user(api_key):
+	headers = {'X-Cloupia-Request-Key': api_key}
+	#payload = {'formatType': 'json',
+	payload = {
+		'opName': 'Intercloud:userAPIGetAllVms'
+	}
+	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
+	pp = pprint.PrettyPrinter(indent=2)
+	pp.pprint(result.json())
+	
 
 def delete_user(data):
-	api_key=get_apikey(admin_username, admin_password)
-	if len(api_key) > 0:
-		# delete user
-		headers = {'X-Cloupia-Request-Key': api_key}
-		opdata  = {
-			'param0': data['userid'],		# username
-		}
-		payload = {
-			'formatType': 'json', 
-			'opName': 'userAPIDeleteUser', 
-		#	'opData': json.dumps(opdata, separators=(',', ':')).replace('"', "'")
-		#	'opData': json.dumps(opdata, separators=(',', ':'))
-			'opData': json.dumps(opdata)
-		}
-		result = requests.get(base_url, params=payload, headers=headers, verify=False)
-		return result
+	# show VMs (if any)
+	# show_vms_for_user(api_key)
+
+	# delete user
+	headers = {'X-Cloupia-Request-Key': admin_apikey}
+	opdata  = {
+		'param0': data['userid'],		# username
+	}
+	payload = {
+		'formatType': 'json', 
+		'opName': 'userAPIDeleteUser', 
+	#	'opData': json.dumps(opdata, separators=(',', ':')).replace('"', "'")
+	#	'opData': json.dumps(opdata, separators=(',', ':'))
+		'opData': json.dumps(opdata)
+	}
+	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
+	return result
+
+
+def enable_logging():
+	# These two lines enable debugging at httplib level (requests->urllib3->http.client)
+	# You will see the REQUEST, including HEADERS and DATA, and RESPONSE with HEADERS but without DATA.
+	# The only thing missing will be the response.body which is not logged.
+	try:
+		import http.client as http_client
+	except ImportError:
+		# Python 2
+		import httplib as http_client
+	http_client.HTTPConnection.debuglevel = 1
+
+	# You must initialize logging, otherwise you'll not see debug output.
+	logging.basicConfig() 
+	logging.getLogger().setLevel(logging.DEBUG)
+	requests_log = logging.getLogger("requests.packages.urllib3")
+	requests_log.setLevel(logging.DEBUG)
+	requests_log.propagate = True
 
 
 def main(argv):
@@ -184,8 +230,11 @@ def main(argv):
 
 	if command == 'add':
 		if debug>0:
+			enable_logging()
 			print(provision)
 		
+		get_admin_apikey()
+		# result = add_group('group-'+provision['userid'])
 		result = add_user(provision)
 		#
 		# FIXME
@@ -193,14 +242,14 @@ def main(argv):
 		# API call does not return valid JSON
 		# it returns a print of the python data structure!
 		#
-		#print(result[0].json())
+		print(result[0].json())
 		aha=str(result[0].json()).replace("u'", '"')
 		aha=aha.replace("'",'"')
 		aha=aha.replace("None","null")
 		aha=aha.replace("True","true")
-		#print(aha)
+		print(aha)
 		data = json.loads(aha)
-		#print(data)
+		print(data)
 		if data['serviceError'] != None:
 			print("Error:", data['serviceError'])
 		else:
@@ -211,13 +260,18 @@ def main(argv):
 				print("User-ID :", provision['userid'])
 				print("Password:", result[1])
 				print("API Key :", api_key)
+				show_vms_for_user(api_key)
 			else:
 				print("Error retrieving API Key")
 			print("*"*45)
 
 	elif command == 'delete':
 		if debug>0:
+			enable_logging()
 			print(provision)
+
+		get_admin_apikey()
+		# result = delete_group('group-'+provision['userid'])
 		result = delete_user(provision)
 		#
 		# FIXME
@@ -246,5 +300,4 @@ def main(argv):
 if __name__ == "__main__":
    main(sys.argv)
 
-# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 
