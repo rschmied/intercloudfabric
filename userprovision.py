@@ -47,23 +47,23 @@ BillingAdmin
 '''
 
 debug = 0
-verify_ssl = False
+verify_ssl = True
 admin_username = "admin"
 admin_password = "somepassword"
 base_url = "https://some.server.com:443/app/api/rest"
 admin_apikey = ''
 
-# fix me on the server side!!!!
-if not verify_ssl:
-	requests.packages.urllib3.disable_warnings()
 
 
 def usage(name, code):
-	print('Usage:', name, '[-a, -add]|[-d, --delete] [options] userid', file=sys.stderr)
+	print('Usage:', name, '[options] add | delete userid', file=sys.stderr)
+	print('  -d, --debug', file=sys.stderr)
 	print('  -e, --email=emailaddress', file=sys.stderr)
 	print('  -f, --firstname=firstname', file=sys.stderr)
-	print('  -l, --lastname=lastname', file=sys.stderr)
+	print('  -h, --help', file=sys.stderr)
 	print('  -j, --json', file=sys.stderr)
+	print('  -l, --lastname=lastname', file=sys.stderr)
+	print('  -n, --no-ssl-verify', file=sys.stderr)
 	sys.exit(code)
 
 
@@ -78,7 +78,7 @@ def get_apikey(username, password):
 	# get the API key for the admin user
 	payload = {'formatType': 'json', 'opName': 'getRESTKey', 'user': username, 'password': password}
 	result = requests.get(base_url, params=payload, verify=verify_ssl)
-	if debug>0:
+	if debug:
 		print(result.status_code)
 
 	# 200 if we got a valid key
@@ -138,7 +138,7 @@ def add_user(data):
 	#	'opData': json.dumps(opdata, separators=(',', ':'))
 		'opData': json.dumps(opdata)
 	}
-	if debug>1:
+	if debug:
 		print(opdata)
 	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
 	return [result, password]
@@ -194,7 +194,39 @@ def enable_logging():
 	requests_log.propagate = True
 
 
+def fix_json_result(data):
+	#
+	# FIXME
+	# all this replace() stuff is a workaround
+	# API call does not return valid JSON
+	# it returns a print of the python data structure!
+	#
+	if debug:
+		print(data)
+	temp = str(data).replace("u'", '"')
+	temp = temp.replace("'",'"')
+	temp = temp.replace("None","null")
+	temp = temp.replace("True","true")
+	if debug:
+		print(temp)
+	return temp
+
+
+def print_result(result):
+	print("*"*45)
+	if result['success']:
+		print("Success!")
+		print("User-ID :", result['userid'])
+		print("Password:", result['password'])
+		print("API Key :", result['apikey'])
+	else:
+		print("Error:", result['error'])
+	print("*"*45)
+
+
 def main(argv):
+
+	global debug, verify_ssl
 
 	provision = {
 		'email': 'noreply@cisco.com',
@@ -215,17 +247,16 @@ def main(argv):
 
 
 	try:
-		opts, args = getopt.getopt(argv[1:],"ade:f:hjl:",["add","delete","email=","first=","help","json","last="])
+		opts, args = getopt.gnu_getopt(argv[1:],"de:f:hjl:n",["debug","email=","first=","help","json","last=","no-ssl-verify"])
 	except getopt.GetoptError:
 		usage(argv[0], 2)
+
 
 	for opt, arg in opts:
 		if opt in ('-h', '--help'):
 			usage(argv[0], 0)
-		elif opt in ("-a", "--add"):
-			command = 'add'
-		elif opt in ("-d", "--delete"):
-			command = 'delete'
+		elif opt in ("-d", "--debug"):
+			debug = True
 		elif opt in ("-e", "--email"):
 			provision['email'] = arg
 		elif opt in ("-f", "--first"):
@@ -234,39 +265,36 @@ def main(argv):
 			provision['lastname'] = arg
 		elif opt in ("-j", "--json"):
 			jsonoutput = True
+		elif opt in ("-n", "--no-ssl-verify"):
+			# fix me on the server side!!!!
+			requests.packages.urllib3.disable_warnings()
+			verify_ssl = False			
 	
 	# get the userid that we want to create / delete
+
+	try:
+		command = args.pop(0)
+	except IndexError:
+		usage(argv[0], 2)
+	if not command in [ 'add', 'delete' ]:
+		usage(argv[0], 2)
+
 	try:
 		provision['userid'] = args.pop(0)
 	except IndexError:
 		usage(argv[0], 2)
 
 	if command == 'add':
-		if debug>0:
+		if debug:
 			enable_logging()
 			print(provision)
 		
 		get_admin_apikey()
 		# result = add_group('group-'+provision['userid'])
 		result = add_user(provision)
-		#
-		# FIXME
-		# all this replace() stuff is a workaround
-		# API call does not return valid JSON
-		# it returns a print of the python data structure!
-		#
-		if debug>0:
-			print(result[0].json())
-		aha=str(result[0].json()).replace("u'", '"')
-		aha=aha.replace("'",'"')
-		aha=aha.replace("None","null")
-		aha=aha.replace("True","true")
-		if debug>0:
-			print(aha)
-		data = json.loads(aha)
-		if debug>0:
+		data = json.loads(fix_json_result(result[0].json()))
+		if debug:
 			print(data)
-
 
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
@@ -279,59 +307,28 @@ def main(argv):
 		if jsonoutput:
 			print(json.dumps(opresult))
 		else:
-			print("*"*45)
-			if opresult['success']:
-				print("Success!")
-				print("User-ID :", opresult['userid'])
-				print("Password:", opresult['password'])
-				print("API Key :", opresult['apikey'])
-				# show_vms_for_user(api_key)
-			else:
-				print("Error:", opresult['error'])
-			print("*"*45)
+			print_result(opresult)
 
 	elif command == 'delete':
-		if debug>0:
+		if debug:
 			enable_logging()
 			print(provision)
 
 		get_admin_apikey()
 		# result = delete_group('group-'+provision['userid'])
 		result = delete_user(provision)
-		#
-		# FIXME
-		# all this replace() stuff is a workaround
-		# API call does not return valid JSON
-		# it returns a print of the python data structure!
-		#
-		#print(result[0].json())
-		aha=str(result.json()).replace("u'", '"')
-		aha=aha.replace("'",'"')
-		aha=aha.replace("None","null")
-		aha=aha.replace("True","true")
-		if debug>1:
-			print(aha)
-		data = json.loads(aha)
-		if debug>1:
+		data = json.loads(fix_json_result(result.json()))
+		if debug:
 			print(data)
-
 
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
 		opresult['error']    = data['serviceError']
 
-
 		if jsonoutput:
 			print(json.dumps(opresult))
 		else:
-			print("*"*45)
-			if opresult['success']:
-				print("Success!")
-				print("User-ID :", opresult['userid'])
-				# show_vms_for_user(api_key)
-			else:
-				print("Error:", opresult['error'])
-			print("*"*45)
+			print_result(opresult)
 
 	else:		
 		usage(argv[0], 2)
