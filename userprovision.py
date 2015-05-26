@@ -257,7 +257,6 @@ def main(argv):
 		elif opt in ("-d", "--debug"):
 			debug = True
 			enable_logging()
-			print(provision)
 		elif opt in ("-e", "--email"):
 			provision['email'] = arg
 		elif opt in ("-f", "--first"):
