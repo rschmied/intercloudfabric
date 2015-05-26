@@ -46,8 +46,8 @@ MSPAdmin,
 BillingAdmin
 '''
 
-debug=0
-verify_ssl=False
+debug = 0
+verify_ssl = False
 admin_username = "admin"
 admin_password = "somepassword"
 base_url = "https://some.server.com:443/app/api/rest"
@@ -59,11 +59,12 @@ if not verify_ssl:
 
 
 def usage(name, code):
-    print('Usage:', name, '[-a, -add]|[-d, --delete] [options] userid', file=sys.stderr)
-    print('  -e, --email=emailaddress', file=sys.stderr)
-    print('  -f, --firstname=firstname', file=sys.stderr)
-    print('  -l, --lastname=lastname', file=sys.stderr)
-    sys.exit(code)
+	print('Usage:', name, '[-a, -add]|[-d, --delete] [options] userid', file=sys.stderr)
+	print('  -e, --email=emailaddress', file=sys.stderr)
+	print('  -f, --firstname=firstname', file=sys.stderr)
+	print('  -l, --lastname=lastname', file=sys.stderr)
+	print('  -j, --json', file=sys.stderr)
+	sys.exit(code)
 
 
 def create_password():
@@ -127,7 +128,7 @@ def add_user(data):
 		'param3': data['lastname'],			# last name
 		'param4': data['email'],			# email address
 		'param5': 'Regular',				# user role
-		'param6': 'CiscoLiveMilan'			# group name
+		'param6': 'Default Group'			# group name
 	#	'param6': 'group-'+data['userid']	# group name
 	}
 	payload = {
@@ -137,7 +138,8 @@ def add_user(data):
 	#	'opData': json.dumps(opdata, separators=(',', ':'))
 		'opData': json.dumps(opdata)
 	}
-	print(opdata)
+	if debug>1:
+		print(opdata)
 	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
 	return [result, password]
 
@@ -200,9 +202,20 @@ def main(argv):
 		'lastname': 'Lastname',
 		'userid': ""
 	}
+	jsonoutput = False
+
+
+	opresult  = {
+		'success': False,   # success of operation (Boolean)
+		'userid': '',       # user-id (as supplied)
+		'password': '',     # created password for user (empty for delete operation)
+		'apikey': '',       # created API key for user (empty for delete operation)
+		'error': None		# returned error, if any
+	}
+
 
 	try:
-		opts, args = getopt.getopt(argv[1:],"ade:f:hl:",["add","delete","email=","first=","help","last="])
+		opts, args = getopt.getopt(argv[1:],"ade:f:hjl:",["add","delete","email=","first=","help","json","last="])
 	except getopt.GetoptError:
 		usage(argv[0], 2)
 
@@ -219,13 +232,13 @@ def main(argv):
 			provision['firstname'] = arg
 		elif opt in ("-l", "--last"):
 			provision['lastname'] = arg
-		elif opt in ("-u", "--userid"):
-			provision['userid'] = arg
+		elif opt in ("-j", "--json"):
+			jsonoutput = True
 	
 	# get the userid that we want to create / delete
 	try:
 		provision['userid'] = args.pop(0)
-   	except IndexError:
+	except IndexError:
 		usage(argv[0], 2)
 
 	if command == 'add':
@@ -242,27 +255,39 @@ def main(argv):
 		# API call does not return valid JSON
 		# it returns a print of the python data structure!
 		#
-		print(result[0].json())
+		if debug>0:
+			print(result[0].json())
 		aha=str(result[0].json()).replace("u'", '"')
 		aha=aha.replace("'",'"')
 		aha=aha.replace("None","null")
 		aha=aha.replace("True","true")
-		print(aha)
+		if debug>0:
+			print(aha)
 		data = json.loads(aha)
-		print(data)
-		if data['serviceError'] != None:
-			print("Error:", data['serviceError'])
+		if debug>0:
+			print(data)
+
+
+		opresult['success']  = (data['serviceError'] == None)
+		opresult['userid']   = provision['userid']
+		opresult['password'] = result[1]
+		opresult['error']    = data['serviceError']
+
+		if opresult['success']:
+			opresult['apikey'] = get_apikey(opresult['userid'], opresult['password'])
+		
+		if jsonoutput:
+			print(json.dumps(opresult))
 		else:
-			api_key=get_apikey(provision['userid'], result[1])
 			print("*"*45)
-			if len(api_key) > 0:
+			if opresult['success']:
 				print("Success!")
-				print("User-ID :", provision['userid'])
-				print("Password:", result[1])
-				print("API Key :", api_key)
-				show_vms_for_user(api_key)
+				print("User-ID :", opresult['userid'])
+				print("Password:", opresult['password'])
+				print("API Key :", opresult['apikey'])
+				# show_vms_for_user(api_key)
 			else:
-				print("Error retrieving API Key")
+				print("Error:", opresult['error'])
 			print("*"*45)
 
 	elif command == 'delete':
@@ -284,15 +309,29 @@ def main(argv):
 		aha=aha.replace("'",'"')
 		aha=aha.replace("None","null")
 		aha=aha.replace("True","true")
-		#print(aha)
+		if debug>1:
+			print(aha)
 		data = json.loads(aha)
-		#print(data)
-		print("*"*45)
-		if data['serviceError'] != None:
-			print("Error:", data['serviceError'])
+		if debug>1:
+			print(data)
+
+
+		opresult['success']  = (data['serviceError'] == None)
+		opresult['userid']   = provision['userid']
+		opresult['error']    = data['serviceError']
+
+
+		if jsonoutput:
+			print(json.dumps(opresult))
 		else:
-			print("Success! User '", provision['userid'], "' has been deleted!", sep='')
-		print("*"*45)
+			print("*"*45)
+			if opresult['success']:
+				print("Success!")
+				print("User-ID :", opresult['userid'])
+				# show_vms_for_user(api_key)
+			else:
+				print("Error:", opresult['error'])
+			print("*"*45)
 
 	else:		
 		usage(argv[0], 2)
