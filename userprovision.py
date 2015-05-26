@@ -77,18 +77,17 @@ def create_password():
 
 
 def get_apikey(username, password):
-	success = True; e = ''
-
 	# get the API key for the admin user
 	payload = {'formatType': 'json', 'opName': 'getRESTKey', 'user': username, 'password': password}
 	try:
 		result = requests.get(base_url, params=payload, verify=verify_ssl)
 	except requests.exceptions.SSLError as e:
-		success = False
+		print("API-Key, SSL-Error:", e, file=sys.stderr)
+		return ''
 	
 	# 200 if we got a valid key
-	if not success or result.status_code != 200:
-		print(e, file=sys.stderr)
+	if result.status_code != 200:
+		print("API-Key, Request Failed:", result.reason, file=sys.stderr)
 		return ''
 	else:
 		if debug:
