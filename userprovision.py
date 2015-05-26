@@ -25,7 +25,6 @@ from __future__ import print_function
 import requests, json
 import getopt, os, sys, random, string
 import logging
-
 import pprint
 
 
@@ -257,6 +256,8 @@ def main(argv):
 			usage(argv[0], 0)
 		elif opt in ("-d", "--debug"):
 			debug = True
+			enable_logging()
+			print(provision)
 		elif opt in ("-e", "--email"):
 			provision['email'] = arg
 		elif opt in ("-f", "--first"):
@@ -270,8 +271,7 @@ def main(argv):
 			requests.packages.urllib3.disable_warnings()
 			verify_ssl = False			
 	
-	# get the userid that we want to create / delete
-
+	# get the command that we want to work with
 	try:
 		command = args.pop(0)
 	except IndexError:
@@ -279,22 +279,17 @@ def main(argv):
 	if not command in [ 'add', 'delete' ]:
 		usage(argv[0], 2)
 
+	# get the command we should executed
 	try:
 		provision['userid'] = args.pop(0)
 	except IndexError:
 		usage(argv[0], 2)
 
 	if command == 'add':
-		if debug:
-			enable_logging()
-			print(provision)
-		
 		get_admin_apikey()
 		# result = add_group('group-'+provision['userid'])
 		result = add_user(provision)
 		data = json.loads(fix_json_result(result[0].json()))
-		if debug:
-			print(data)
 
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
@@ -310,16 +305,10 @@ def main(argv):
 			print_result(opresult)
 
 	elif command == 'delete':
-		if debug:
-			enable_logging()
-			print(provision)
-
 		get_admin_apikey()
 		# result = delete_group('group-'+provision['userid'])
 		result = delete_user(provision)
 		data = json.loads(fix_json_result(result.json()))
-		if debug:
-			print(data)
 
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
