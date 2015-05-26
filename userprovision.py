@@ -53,6 +53,9 @@ base_url = "https://some.server.com:443/app/api/rest"
 admin_apikey = ''
 
 
+EXIT_FAIL=2
+EXIT_SUCCESS=0
+
 
 def usage(name, code):
 	print('Usage:', name, '[options] add | delete userid', file=sys.stderr)
@@ -63,7 +66,7 @@ def usage(name, code):
 	print('  -j, --json', file=sys.stderr)
 	print('  -l, --lastname=lastname', file=sys.stderr)
 	print('  -n, --no-ssl-verify', file=sys.stderr)
-	sys.exit(code)
+	return code
 
 
 def create_password():
@@ -74,27 +77,23 @@ def create_password():
 
 
 def get_apikey(username, password):
+	success = True; e = ''
+
 	# get the API key for the admin user
 	payload = {'formatType': 'json', 'opName': 'getRESTKey', 'user': username, 'password': password}
-	result = requests.get(base_url, params=payload, verify=verify_ssl)
-	if debug:
-		print(result.status_code)
-
+	try:
+		result = requests.get(base_url, params=payload, verify=verify_ssl)
+	except requests.exceptions.SSLError as e:
+		success = False
+	
 	# 200 if we got a valid key
-	if result.status_code != 200:
-		print("can't get API key!")
+	if not success or result.status_code != 200:
+		print(e, file=sys.stderr)
 		return ''
 	else:
+		if debug:
+			print(result.status_code, file=sys.stderr)
 		return result.json()
-
-
-def get_admin_apikey():
-	global admin_apikey
-
-	admin_apikey = get_apikey(admin_username, admin_password)
-	if len(admin_apikey) == 0:
-		print('Error: admin key retrieval', file=sys.stderr)
-		sys.exit(2)
 
 
 def add_group(groupname):
@@ -138,7 +137,7 @@ def add_user(data):
 		'opData': json.dumps(opdata)
 	}
 	if debug:
-		print(opdata)
+		print(opdata, file=sys.stderr)
 	result = requests.get(base_url, params=payload, headers=headers, verify=verify_ssl)
 	return [result, password]
 
@@ -201,13 +200,13 @@ def fix_json_result(data):
 	# it returns a print of the python data structure!
 	#
 	if debug:
-		print(data)
+		print(data, file=sys.stderr)
 	temp = str(data).replace("u'", '"')
 	temp = temp.replace("'",'"')
 	temp = temp.replace("None","null")
 	temp = temp.replace("True","true")
 	if debug:
-		print(temp)
+		print(temp, file=sys.stderr)
 	return temp
 
 
@@ -225,7 +224,7 @@ def print_result(result):
 
 def main(argv):
 
-	global debug, verify_ssl
+	global debug, verify_ssl, admin_apikey
 
 	provision = {
 		'email': 'noreply@cisco.com',
@@ -248,12 +247,12 @@ def main(argv):
 	try:
 		opts, args = getopt.gnu_getopt(argv[1:],"de:f:hjl:n",["debug","email=","first=","help","json","last=","no-ssl-verify"])
 	except getopt.GetoptError:
-		usage(argv[0], 2)
+		return usage(argv[0], EXIT_FAIL)
 
 
 	for opt, arg in opts:
 		if opt in ('-h', '--help'):
-			usage(argv[0], 0)
+			return usage(argv[0], 0)
 		elif opt in ("-d", "--debug"):
 			debug = True
 			enable_logging()
@@ -270,58 +269,55 @@ def main(argv):
 			requests.packages.urllib3.disable_warnings()
 			verify_ssl = False			
 	
-	# get the command that we want to work with
+	# get the command that we need to execute
 	try:
 		command = args.pop(0)
 	except IndexError:
-		usage(argv[0], 2)
+		return usage(argv[0], EXIT_FAIL)
 	if not command in [ 'add', 'delete' ]:
-		usage(argv[0], 2)
+		return usage(argv[0], EXIT_FAIL)
 
-	# get the command we should executed
+	# get the userid we should use
 	try:
 		provision['userid'] = args.pop(0)
 	except IndexError:
-		usage(argv[0], 2)
+		return usage(argv[0], EXIT_FAIL)
+
+	# retrieve the admin API key
+	admin_apikey = get_apikey(admin_username, admin_password)
+	if len(admin_apikey) == 0:
+		return EXIT_FAIL
 
 	if command == 'add':
-		get_admin_apikey()
 		# result = add_group('group-'+provision['userid'])
 		result = add_user(provision)
 		data = json.loads(fix_json_result(result[0].json()))
-
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
 		opresult['password'] = result[1]
 		opresult['error']    = data['serviceError']
-
 		if opresult['success']:
 			opresult['apikey'] = get_apikey(opresult['userid'], opresult['password'])
 		
-		if jsonoutput:
-			print(json.dumps(opresult))
-		else:
-			print_result(opresult)
-
 	elif command == 'delete':
-		get_admin_apikey()
 		# result = delete_group('group-'+provision['userid'])
 		result = delete_user(provision)
 		data = json.loads(fix_json_result(result.json()))
-
 		opresult['success']  = (data['serviceError'] == None)
 		opresult['userid']   = provision['userid']
 		opresult['error']    = data['serviceError']
 
-		if jsonoutput:
-			print(json.dumps(opresult))
-		else:
-			print_result(opresult)
+	# print result
+	if jsonoutput:
+		print(json.dumps(opresult))
+	else:
+		print_result(opresult)
 
-	else:		
-		usage(argv[0], 2)
+	# make exit status happy
+	if opresult['success']:
+		return EXIT_SUCCESS
+	else:
+		return EXIT_FAIL
 
 if __name__ == "__main__":
-   main(sys.argv)
-
-
+   sys.exit(main(sys.argv))
