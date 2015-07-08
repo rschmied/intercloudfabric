@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
 # Copyright (c) 2015, Cisco
 #
@@ -297,7 +297,9 @@ def main(argv):
 		opresult['error']    = data['serviceError']
 		if opresult['success']:
 			opresult['apikey'] = get_apikey(opresult['userid'], opresult['password'])
-		
+		else:
+			opresult['password'] = ''
+
 	elif command == 'delete':
 		# result = delete_group('group-'+provision['userid'])
 		result = delete_user(provision)
